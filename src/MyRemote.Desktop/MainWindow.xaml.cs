@@ -22,6 +22,11 @@ public partial class MainWindow : Window
         if (Vm is not null) Vm.ActiveSection = NavSection.Sessions;
     }
 
+    private void NavLogs_Click(object sender, RoutedEventArgs e)
+    {
+        if (Vm is not null) Vm.ActiveSection = NavSection.Logs;
+    }
+
     private void NavSettings_Click(object sender, RoutedEventArgs e)
     {
         if (Vm is not null) Vm.ActiveSection = NavSection.Settings;

@@ -56,6 +56,7 @@ public partial class App : Application
         services.AddSingleton<InternetDiagnosticsService>();
         services.AddSingleton<RemoteSessionCoordinator>();
         services.AddSingleton<ThemeService>();
+        services.AddSingleton(_fileLoggerProvider);
         services.AddSingleton(sp => new MainViewModel(
             sp.GetRequiredService<IDeviceIdentityProvider>(),
             sp.GetRequiredService<ISettingsRepository>(),
@@ -65,6 +66,7 @@ public partial class App : Application
             sp.GetRequiredService<RemoteSessionCoordinator>(),
             sp.GetRequiredService<InternetDiagnosticsService>(),
             sp.GetRequiredService<ThemeService>(),
+            sp.GetRequiredService<RollingFileLoggerProvider>(),
             sp.GetRequiredService<ILogger<MainViewModel>>(),
             logDir));
         services.AddSingleton<MainWindow>();

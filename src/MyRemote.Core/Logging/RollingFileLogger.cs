@@ -11,9 +11,11 @@ public sealed partial class RollingFileLoggerProvider : ILoggerProvider
 {
     private readonly string _logDirectory;
     private readonly LogLevel _minLevel;
-    private readonly ConcurrentQueue<string> _buffer = new();
+    private readonly ConcurrentQueue<string> _recentLines = new();
     private readonly object _writeLock = new();
     private bool _disposed;
+
+    public event Action<string>? LogWritten;
 
     public RollingFileLoggerProvider(string logDirectory, LogLevel minLevel = LogLevel.Information)
     {
@@ -21,6 +23,8 @@ public sealed partial class RollingFileLoggerProvider : ILoggerProvider
         _minLevel = minLevel;
         Directory.CreateDirectory(_logDirectory);
     }
+
+    public IReadOnlyList<string> GetRecentLines() => _recentLines.ToArray();
 
     public ILogger CreateLogger(string categoryName) => new RollingFileLogger(categoryName, this);
 
@@ -38,11 +42,19 @@ public sealed partial class RollingFileLoggerProvider : ILoggerProvider
             line += $"{Environment.NewLine}  Exception: {exception.GetType().Name}: {RedactSecrets(exception.Message)}";
         }
 
+        _recentLines.Enqueue(line);
+        while (_recentLines.Count > 500)
+        {
+            _recentLines.TryDequeue(out _);
+        }
+
         var filePath = Path.Combine(_logDirectory, $"myremote-{DateTime.UtcNow:yyyy-MM-dd}.log");
         lock (_writeLock)
         {
             File.AppendAllText(filePath, line + Environment.NewLine);
         }
+
+        LogWritten?.Invoke(line);
     }
 
     public static string RedactSecrets(string input)

@@ -15,8 +15,9 @@ public enum NavSection
 {
     Workbench = 0,
     Sessions = 1,
-    Settings = 2,
-    About = 3
+    Logs = 2,
+    Settings = 3,
+    About = 4
 }
 
 public sealed class MainViewModel : ObservableObject
@@ -29,6 +30,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly RemoteSessionCoordinator _coordinator;
     private readonly InternetDiagnosticsService _diagnosticsService;
     private readonly ThemeService _themeService;
+    private readonly MyRemote.Core.Logging.RollingFileLoggerProvider _logProvider;
     private readonly ILogger<MainViewModel> _logger;
 
     private DeviceIdentity? _localIdentity;
@@ -68,6 +70,7 @@ public sealed class MainViewModel : ObservableObject
         RemoteSessionCoordinator coordinator,
         InternetDiagnosticsService diagnosticsService,
         ThemeService themeService,
+        MyRemote.Core.Logging.RollingFileLoggerProvider logProvider,
         ILogger<MainViewModel> logger,
         string logDirectory)
     {
@@ -79,8 +82,22 @@ public sealed class MainViewModel : ObservableObject
         _coordinator = coordinator;
         _diagnosticsService = diagnosticsService;
         _themeService = themeService;
+        _logProvider = logProvider;
         _logger = logger;
         LogDirectory = logDirectory;
+
+        foreach (var existing in _logProvider.GetRecentLines())
+        {
+            LogEntries.Add(existing);
+        }
+        _logProvider.LogWritten += line =>
+        {
+            Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                LogEntries.Add(line);
+                while (LogEntries.Count > 500) LogEntries.RemoveAt(0);
+            });
+        };
 
         _sessionManager.StateChanged += (_, state) =>
         {
@@ -119,13 +136,17 @@ public sealed class MainViewModel : ObservableObject
         DisconnectHostCommand = new AsyncRelayCommand(() => _coordinator.DisconnectAsync("Terminated by host"));
         RevokeInputCommand = new AsyncRelayCommand(() => _coordinator.RevokeInputAsync());
         RunDiagnosticsCommand = new AsyncRelayCommand(RunDiagnosticsAsync);
+        CopyLogsCommand = new RelayCommand(CopyLogs);
+        OpenLogFolderCommand = new RelayCommand(OpenLogFolder);
+        ClearLogsCommand = new RelayCommand(() => LogEntries.Clear());
     }
 
     public string LogDirectory { get; }
-    public string AppVersion => "1.0.0";
+    public string AppVersion => "1.0.2";
 
     public ObservableCollection<DiscoveredPeer> DiscoveredPeers { get; } = [];
     public ObservableCollection<SessionHistoryEntry> RecentSessions { get; } = [];
+    public ObservableCollection<string> LogEntries { get; } = [];
     public bool HasNoDiscoveredPeers => DiscoveredPeers.Count == 0;
 
     public NavSection ActiveSection
@@ -137,6 +158,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(IsWorkbenchVisible));
                 OnPropertyChanged(nameof(IsSessionsVisible));
+                OnPropertyChanged(nameof(IsLogsVisible));
                 OnPropertyChanged(nameof(IsSettingsVisible));
                 OnPropertyChanged(nameof(IsAboutVisible));
             }
@@ -145,6 +167,7 @@ public sealed class MainViewModel : ObservableObject
 
     public bool IsWorkbenchVisible => ActiveSection == NavSection.Workbench;
     public bool IsSessionsVisible => ActiveSection == NavSection.Sessions;
+    public bool IsLogsVisible => ActiveSection == NavSection.Logs;
     public bool IsSettingsVisible => ActiveSection == NavSection.Settings;
     public bool IsAboutVisible => ActiveSection == NavSection.About;
 
@@ -194,6 +217,9 @@ public sealed class MainViewModel : ObservableObject
     public ICommand DisconnectHostCommand { get; }
     public ICommand RevokeInputCommand { get; }
     public ICommand RunDiagnosticsCommand { get; }
+    public ICommand CopyLogsCommand { get; }
+    public ICommand OpenLogFolderCommand { get; }
+    public ICommand ClearLogsCommand { get; }
 
     public async Task InitializeAsync()
     {
@@ -340,5 +366,35 @@ public sealed class MainViewModel : ObservableObject
         DiagnosticsOutput = "Running STUN & IPv6 network diagnostics...";
         var report = await _diagnosticsService.RunDiagnosticsAsync(StunServer);
         DiagnosticsOutput = report.Summary;
+        _logger.LogInformation("Network diagnostics: {Summary}", report.Summary);
+    }
+
+    private void CopyLogs()
+    {
+        try
+        {
+            Clipboard.SetDataObject(string.Join(Environment.NewLine, LogEntries), false);
+            StatusMessage = "Audit logs copied to clipboard";
+        }
+        catch
+        {
+            StatusMessage = "Failed to copy logs to clipboard";
+        }
+    }
+
+    private void OpenLogFolder()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = LogDirectory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not open log directory");
+        }
     }
 }

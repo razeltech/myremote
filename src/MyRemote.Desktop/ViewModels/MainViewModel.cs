@@ -142,7 +142,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public string LogDirectory { get; }
-    public string AppVersion => "1.0.2";
+    public string AppVersion => "1.0.3";
 
     public ObservableCollection<DiscoveredPeer> DiscoveredPeers { get; } = [];
     public ObservableCollection<SessionHistoryEntry> RecentSessions { get; } = [];

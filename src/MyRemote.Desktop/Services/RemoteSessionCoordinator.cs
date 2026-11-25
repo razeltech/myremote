@@ -119,7 +119,10 @@ public sealed class RemoteSessionCoordinator : IDisposable
 
         _lanTransport.IncomingApprovalHandler = req => HandleIncomingApprovalAsync(_lanTransport, req, settings);
         _webRtcTransport.IncomingApprovalHandler = req => HandleIncomingApprovalAsync(_webRtcTransport, req, settings);
-        _webRtcTransport.StartSignaling(identity, settings);
+        if (!_webRtcTransport.IsSignalingConnected)
+        {
+            _webRtcTransport.StartSignaling(identity, settings);
+        }
 
         if (settings.EnableLanDiscovery)
         {

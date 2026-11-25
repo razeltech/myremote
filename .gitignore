@@ -485,3 +485,4 @@ $RECYCLE.BIN/
 
 # Standalone release output (uploaded as GitHub Release asset)
 release/
+release_out/

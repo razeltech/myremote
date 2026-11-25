@@ -255,6 +255,7 @@ public sealed class WebRtcPeerTransport(
 
             var offer = _pc.createOffer();
             await _pc.setLocalDescription(offer).ConfigureAwait(false);
+            logger.LogInformation("Sending WebRTC OFFER to {RemotePeerId}", _remotePeerId);
 
             await SendSignalAsync(new
             {
@@ -306,19 +307,22 @@ public sealed class WebRtcPeerTransport(
                 break;
 
             case "OFFER":
+                logger.LogInformation("Received WebRTC OFFER from {Src}", root.TryGetProperty("src", out var s) ? s.GetString() : "unknown");
                 await HandleIncomingOfferAsync(root, ct).ConfigureAwait(false);
                 break;
 
             case "ANSWER":
+                logger.LogInformation("Received WebRTC ANSWER");
                 if (_pc is not null && root.TryGetProperty("payload", out var ansPayload) &&
                     ansPayload.TryGetProperty("sdp", out var ansSdp) &&
                     ansSdp.TryGetProperty("sdp", out var ansSdpStr))
                 {
-                    _pc.setRemoteDescription(new RTCSessionDescriptionInit
+                    var res = _pc.setRemoteDescription(new RTCSessionDescriptionInit
                     {
                         type = RTCSdpType.answer,
                         sdp = ansSdpStr.GetString()
                     });
+                    logger.LogInformation("SetRemoteDescription(Answer) => {Result}", res);
                 }
                 break;
 
@@ -400,14 +404,16 @@ public sealed class WebRtcPeerTransport(
             }
         };
 
-        _pc.setRemoteDescription(new RTCSessionDescriptionInit
+        var setRes = _pc.setRemoteDescription(new RTCSessionDescriptionInit
         {
             type = RTCSdpType.offer,
             sdp = sdpStr.GetString()
         });
+        logger.LogInformation("SetRemoteDescription(Offer) => {Result}", setRes);
 
         var answer = _pc.createAnswer();
         await _pc.setLocalDescription(answer).ConfigureAwait(false);
+        logger.LogInformation("Sending WebRTC ANSWER to {RemotePeerId}", _remotePeerId);
 
         await SendSignalAsync(new
         {
@@ -680,11 +686,14 @@ public sealed class WebRtcPeerTransport(
 
     private void CleanupPeerConnection()
     {
-        try { _dc?.close(); } catch { /* ignore */ }
-        try { _pc?.close(); } catch { /* ignore */ }
+        var dc = _dc;
+        var pc = _pc;
         _dc = null;
         _pc = null;
         _assemblies.Clear();
+
+        try { dc?.close(); } catch { /* ignore */ }
+        try { pc?.close(); } catch { /* ignore */ }
     }
 
     private void CleanupSession(string reason)

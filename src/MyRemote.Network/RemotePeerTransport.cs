@@ -18,7 +18,7 @@ namespace MyRemote.Network;
 public sealed class RemotePeerTransport(
     ISessionManager sessionManager,
     ISecurityService securityService,
-    ILogger<RemotePeerTransport> logger) : IDisposable
+    ILogger<RemotePeerTransport> logger) : IPeerTransport, IDisposable
 {
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private TcpListener? _listener;

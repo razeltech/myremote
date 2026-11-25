@@ -17,7 +17,7 @@ namespace MyRemote.Desktop;
 
 public partial class SessionViewerWindow : Window
 {
-    private readonly RemotePeerTransport _transport;
+    private readonly IPeerTransport _transport;
     private readonly ISessionManager _sessionManager;
     private readonly FileTransferService _fileTransferService;
     private readonly DispatcherTimer _statsTimer;
@@ -32,7 +32,7 @@ public partial class SessionViewerWindow : Window
     private DateTime _lastMouseMoveSent = DateTime.MinValue;
 
     public SessionViewerWindow(
-        RemotePeerTransport transport,
+        IPeerTransport transport,
         ISessionManager sessionManager,
         FileTransferService fileTransferService,
         string remoteTitle)

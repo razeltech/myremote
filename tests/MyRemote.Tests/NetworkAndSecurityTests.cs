@@ -122,4 +122,12 @@ public class NetworkAndSecurityTests
         var parsed = InternetDiagnosticsService.ParseStunMappedAddress(packet);
         Assert.Equal("203.0.113.45:54321", parsed);
     }
+
+    [Fact]
+    public void WebRtcPeerId_RoundTripsDeviceId()
+    {
+        var peerId = WebRtcPeerTransport.ToPeerId("482-910-334");
+        Assert.Equal("myremote-482910334", peerId);
+        Assert.Equal("482-910-334", WebRtcPeerTransport.FromPeerId(peerId));
+    }
 }

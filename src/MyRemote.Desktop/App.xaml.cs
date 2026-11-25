@@ -52,6 +52,7 @@ public partial class App : Application
         services.AddSingleton<FileTransferService>();
         services.AddSingleton<LanDiscoveryService>();
         services.AddSingleton<RemotePeerTransport>();
+        services.AddSingleton<WebRtcPeerTransport>();
         services.AddSingleton<InternetDiagnosticsService>();
         services.AddSingleton<RemoteSessionCoordinator>();
         services.AddSingleton<ThemeService>();

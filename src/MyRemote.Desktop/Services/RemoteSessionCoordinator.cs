@@ -13,12 +13,13 @@ using MyRemote.ScreenCapture;
 namespace MyRemote.Desktop.Services;
 
 /// <summary>
-/// Coordinates LAN discovery, TLS host/client sessions, screen streaming, input injection, clipboard, and file transfer.
+/// Coordinates LAN discovery, LAN TLS & Internet WebRTC sessions, screen streaming, input injection, clipboard, and file transfer.
 /// </summary>
 public sealed class RemoteSessionCoordinator : IDisposable
 {
     private readonly LanDiscoveryService _discovery;
-    private readonly RemotePeerTransport _transport;
+    private readonly RemotePeerTransport _lanTransport;
+    private readonly WebRtcPeerTransport _webRtcTransport;
     private readonly IScreenCaptureService _captureService;
     private readonly IInputInjector _inputInjector;
     private readonly FileTransferService _fileTransfer;
@@ -27,6 +28,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
     private readonly ISessionHistoryRepository _historyRepository;
     private readonly ILogger<RemoteSessionCoordinator> _logger;
 
+    private IPeerTransport _activeTransport;
     private CancellationTokenSource? _streamCts;
     private int _activeMonitorIndex;
     private int _targetFps = 30;
@@ -36,7 +38,8 @@ public sealed class RemoteSessionCoordinator : IDisposable
 
     public RemoteSessionCoordinator(
         LanDiscoveryService discovery,
-        RemotePeerTransport transport,
+        RemotePeerTransport lanTransport,
+        WebRtcPeerTransport webRtcTransport,
         IScreenCaptureService captureService,
         IInputInjector inputInjector,
         FileTransferService fileTransfer,
@@ -46,7 +49,9 @@ public sealed class RemoteSessionCoordinator : IDisposable
         ILogger<RemoteSessionCoordinator> logger)
     {
         _discovery = discovery;
-        _transport = transport;
+        _lanTransport = lanTransport;
+        _webRtcTransport = webRtcTransport;
+        _activeTransport = lanTransport;
         _captureService = captureService;
         _inputInjector = inputInjector;
         _fileTransfer = fileTransfer;
@@ -55,23 +60,11 @@ public sealed class RemoteSessionCoordinator : IDisposable
         _historyRepository = historyRepository;
         _logger = logger;
 
-        _transport.InputCommandPayloadReceived += OnInputPayloadReceived;
-        _transport.SelectMonitorRequested += (_, idx) => _activeMonitorIndex = idx;
-        _transport.QualitySettingsReceived += (_, q) =>
-        {
-            _targetFps = Math.Clamp(q.TargetFps, 5, 60);
-            _jpegQuality = Math.Clamp(q.JpegQuality, 20, 95);
-            _scale = Math.Clamp(q.Scale, 0.25, 1.0);
-        };
-        _transport.ClipboardTextReceived += (_, text) =>
-        {
-            Application.Current?.Dispatcher.Invoke(() => Clipboard.SetText(text));
-        };
-        _transport.FileOfferPayloadReceived += OnFileOfferReceived;
-        _transport.FileChunkReceived += OnFileChunkReceived;
-        _transport.FileCompleteReceived += OnFileCompleteReceived;
-        _transport.SessionDisconnected += OnSessionDisconnected;
+        WireTransportEvents(_lanTransport);
+        WireTransportEvents(_webRtcTransport);
     }
+
+    public bool IsInternetSignalingReady => _webRtcTransport.IsSignalingConnected;
 
     public event EventHandler<IReadOnlyList<DiscoveredPeer>>? PeersUpdated
     {
@@ -79,13 +72,39 @@ public sealed class RemoteSessionCoordinator : IDisposable
         remove => _discovery.PeersUpdated -= value;
     }
 
+    private void WireTransportEvents(IPeerTransport t)
+    {
+        t.InputCommandPayloadReceived += OnInputPayloadReceived;
+        t.SelectMonitorRequested += (_, idx) => _activeMonitorIndex = idx;
+        t.QualitySettingsReceived += (_, q) =>
+        {
+            _targetFps = Math.Clamp(q.TargetFps, 5, 60);
+            _jpegQuality = Math.Clamp(q.JpegQuality, 20, 95);
+            _scale = Math.Clamp(q.Scale, 0.25, 1.0);
+        };
+        t.ClipboardTextReceived += (_, text) =>
+        {
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                try { Clipboard.SetDataObject(text, false); } catch { /* ignore */ }
+            });
+        };
+        t.FileOfferPayloadReceived += OnFileOfferReceived;
+        t.FileChunkReceived += OnFileChunkReceived;
+        t.FileCompleteReceived += OnFileCompleteReceived;
+        t.SessionDisconnected += OnSessionDisconnected;
+    }
+
     public void StartNode(DeviceIdentity identity, AppSettings settings)
     {
         _targetFps = settings.TargetFps;
         _jpegQuality = settings.JpegQuality;
 
-        _transport.IncomingApprovalHandler = request => HandleIncomingApprovalAsync(request, settings);
-        _transport.StartListening(identity, settings.ListenPort);
+        _lanTransport.IncomingApprovalHandler = req => HandleIncomingApprovalAsync(_lanTransport, req, settings);
+        _webRtcTransport.IncomingApprovalHandler = req => HandleIncomingApprovalAsync(_webRtcTransport, req, settings);
+
+        _lanTransport.StartListening(identity, settings.ListenPort);
+        _webRtcTransport.StartSignaling(identity, settings);
 
         if (settings.EnableLanDiscovery)
         {
@@ -97,7 +116,10 @@ public sealed class RemoteSessionCoordinator : IDisposable
     {
         _targetFps = Math.Clamp(settings.TargetFps, 5, 60);
         _jpegQuality = Math.Clamp(settings.JpegQuality, 20, 95);
-        _transport.IncomingApprovalHandler = request => HandleIncomingApprovalAsync(request, settings);
+
+        _lanTransport.IncomingApprovalHandler = req => HandleIncomingApprovalAsync(_lanTransport, req, settings);
+        _webRtcTransport.IncomingApprovalHandler = req => HandleIncomingApprovalAsync(_webRtcTransport, req, settings);
+        _webRtcTransport.StartSignaling(identity, settings);
 
         if (settings.EnableLanDiscovery)
         {
@@ -109,7 +131,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
         }
     }
 
-    private async Task<SessionApprovalResult> HandleIncomingApprovalAsync(SessionRequest request, AppSettings settings)
+    private async Task<SessionApprovalResult> HandleIncomingApprovalAsync(IPeerTransport sourceTransport, SessionRequest request, AppSettings settings)
     {
         return await Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -120,20 +142,23 @@ public sealed class RemoteSessionCoordinator : IDisposable
                 return new SessionApprovalResult(false, SessionPermissions.None, null, "Rejected by host user.");
             }
 
+            _activeTransport = sourceTransport;
             var token = _securityService.GenerateSessionToken();
-            _ = StartHostStreamingAsync(request, token);
+            _ = StartHostStreamingAsync(sourceTransport, request);
             return new SessionApprovalResult(true, dlg.GrantedPermissions, token, null);
         }).Task;
     }
 
-    private async Task StartHostStreamingAsync(SessionRequest request, string token)
+    private async Task StartHostStreamingAsync(IPeerTransport transport, SessionRequest request)
     {
         _activeHistoryRowId = await _historyRepository.RecordStartAsync(new SessionHistoryEntry(
-            0, request.RequesterDeviceId, request.RequesterDisplayName, true, TransportMode.LanDirect, DateTimeOffset.UtcNow, null, "Active"));
+            0, request.RequesterDeviceId, request.RequesterDisplayName, true,
+            transport is WebRtcPeerTransport ? TransportMode.InternetDirect : TransportMode.LanDirect,
+            DateTimeOffset.UtcNow, null, "Active"));
 
         await Task.Delay(150);
         var monitors = _captureService.GetMonitors();
-        await _transport.SendRawAsync(WireMessageType.MonitorList, JsonSerializer.SerializeToUtf8Bytes(monitors));
+        await transport.SendRawAsync(WireMessageType.MonitorList, JsonSerializer.SerializeToUtf8Bytes(monitors));
 
         _streamCts?.Cancel();
         _streamCts = new CancellationTokenSource();
@@ -141,7 +166,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
 
         _ = Task.Run(async () =>
         {
-            while (!ct.IsCancellationRequested && _transport.IsSessionActive)
+            while (!ct.IsCancellationRequested && transport.IsSessionActive)
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 if (_sessionManager.HasPermission(SessionPermissions.ViewScreen))
@@ -149,7 +174,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
                     var frame = _captureService.CaptureMonitor(_activeMonitorIndex, _jpegQuality, _scale);
                     if (frame is not null)
                     {
-                        await _transport.SendRawAsync(WireMessageType.ScreenFrame, frame.JpegBytes, ct);
+                        await transport.SendRawAsync(WireMessageType.ScreenFrame, frame.JpegBytes, ct);
                     }
                 }
 
@@ -166,7 +191,8 @@ public sealed class RemoteSessionCoordinator : IDisposable
         int port,
         string remoteLabel)
     {
-        var result = await _transport.ConnectAsync(
+        _activeTransport = _lanTransport;
+        var result = await _lanTransport.ConnectAsync(
             localIdentity,
             localDisplayName,
             hostIp,
@@ -180,7 +206,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
 
             Application.Current.Dispatcher.Invoke(() =>
             {
-                var viewer = new SessionViewerWindow(_transport, _sessionManager, _fileTransfer, $"{remoteLabel} ({hostIp}:{port})");
+                var viewer = new SessionViewerWindow(_lanTransport, _sessionManager, _fileTransfer, $"{remoteLabel} ({hostIp}:{port})");
                 viewer.Show();
             });
         }
@@ -188,7 +214,34 @@ public sealed class RemoteSessionCoordinator : IDisposable
         return result;
     }
 
-    public Task DisconnectAsync(string reason = "Disconnected by host") => _transport.DisconnectAsync(reason);
+    public async Task<SessionApprovalResult> ConnectInternetByDeviceIdAsync(
+        DeviceIdentity localIdentity,
+        string localDisplayName,
+        string targetDeviceId)
+    {
+        _activeTransport = _webRtcTransport;
+        var result = await _webRtcTransport.ConnectAsync(
+            localIdentity,
+            localDisplayName,
+            targetDeviceId,
+            SessionPermissions.AllControl);
+
+        if (result.Approved)
+        {
+            _activeHistoryRowId = await _historyRepository.RecordStartAsync(new SessionHistoryEntry(
+                0, targetDeviceId, targetDeviceId, false, TransportMode.InternetDirect, DateTimeOffset.UtcNow, null, "Active"));
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var viewer = new SessionViewerWindow(_webRtcTransport, _sessionManager, _fileTransfer, $"{targetDeviceId} (Internet WebRTC)");
+                viewer.Show();
+            });
+        }
+
+        return result;
+    }
+
+    public Task DisconnectAsync(string reason = "Disconnected by host") => _activeTransport.DisconnectAsync(reason);
 
     public async Task RevokeInputAsync()
     {
@@ -196,7 +249,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
         if (session is null) return;
         var updated = session.GrantedPermissions & ~(SessionPermissions.MouseInput | SessionPermissions.KeyboardInput);
         _sessionManager.UpdatePermissions(updated);
-        await _transport.SendRawAsync(WireMessageType.PermissionUpdate, JsonSerializer.SerializeToUtf8Bytes(updated));
+        await _activeTransport.SendRawAsync(WireMessageType.PermissionUpdate, JsonSerializer.SerializeToUtf8Bytes(updated));
     }
 
     private void OnInputPayloadReceived(object? sender, byte[] payload)
@@ -274,6 +327,7 @@ public sealed class RemoteSessionCoordinator : IDisposable
     {
         _streamCts?.Cancel();
         _discovery.Dispose();
-        _transport.Dispose();
+        _lanTransport.Dispose();
+        _webRtcTransport.Dispose();
     }
 }

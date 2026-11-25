@@ -298,12 +298,18 @@ public sealed class MainViewModel : ObservableObject
             var formatted = _securityService.FormatDeviceId(raw);
             PartnerIdInput = formatted;
             var peer = DiscoveredPeers.FirstOrDefault(p => p.DeviceId == formatted);
-            if (peer is null)
+            if (peer is not null)
             {
-                StatusMessage = $"Peer {formatted} not found on LAN. Enter IP[:Port] for direct connection.";
+                await ConnectEndpointAsync(peer.IpAddress, peer.Port, peer.DisplayName);
                 return;
             }
-            await ConnectEndpointAsync(peer.IpAddress, peer.Port, peer.DisplayName);
+
+            if (_localIdentity is null) return;
+            StatusMessage = $"Connecting over Internet P2P to {formatted} — awaiting host approval...";
+            var internetRes = await _coordinator.ConnectInternetByDeviceIdAsync(_localIdentity, DisplayName, formatted);
+            StatusMessage = internetRes.Approved
+                ? $"Connected to {formatted} (Internet P2P)"
+                : $"Internet connection failed: {internetRes.Reason ?? "Peer offline or declined"}";
             return;
         }
 

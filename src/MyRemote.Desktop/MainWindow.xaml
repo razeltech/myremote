@@ -1,0 +1,485 @@
+﻿<Window x:Class="MyRemote.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:MyRemote.Desktop.ViewModels"
+        Title="MyRemote — Secure Remote Desktop"
+        Icon="pack://application:,,,/Assets/myremote.ico"
+        Width="1120"
+        Height="720"
+        MinWidth="900"
+        MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BgBaseBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI">
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Left Navigation Rail -->
+        <Border Grid.Column="0"
+                Background="{DynamicResource BgRailBrush}"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,0,1,0"
+                Padding="16,20">
+            <DockPanel LastChildFill="True">
+                <!-- Original MyRemote Brand Mark -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,0,28">
+                    <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource AccentPrimaryBrush}">
+                        <Viewbox Width="20" Height="20">
+                            <Canvas Width="24" Height="24">
+                                <Path Data="M3,5 H17 V15 H3 Z" Stroke="#FFFFFF" StrokeThickness="2" StrokeLineJoin="Round" />
+                                <Path Data="M8,19 H21 V9" Stroke="#FFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                            </Canvas>
+                        </Viewbox>
+                    </Border>
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="MyRemote" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Peer Workbench" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Bottom Node Status & Theme Toggle -->
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                    <Border Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="12,10"
+                            Margin="0,0,0,10">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <Ellipse Width="8" Height="8" Fill="{DynamicResource AccentSuccessBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ConnectionStateLabel}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding DisplayName}" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="0,2,0,0">
+                                <Run Text="Key:" />
+                                <Run Text="{Binding PublicKeyFingerprint, Mode=OneWay}" />
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <Button Content="{Binding ThemeToggleLabel}"
+                            Command="{Binding ToggleThemeCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            HorizontalAlignment="Stretch" />
+                </StackPanel>
+
+                <!-- Navigation Items -->
+                <StackPanel>
+                    <RadioButton Content="Workbench"
+                                 Style="{StaticResource NavButtonStyle}"
+                                 IsChecked="True"
+                                 Click="NavWorkbench_Click" />
+                    <RadioButton Content="Session History"
+                                 Style="{StaticResource NavButtonStyle}"
+                                 Click="NavSessions_Click" />
+                    <RadioButton Content="Settings"
+                                 Style="{StaticResource NavButtonStyle}"
+                                 Click="NavSettings_Click" />
+                    <RadioButton Content="About &amp; Security"
+                                 Style="{StaticResource NavButtonStyle}"
+                                 Click="NavAbout_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Main Content Area -->
+        <Grid Grid.Column="1" Margin="24,22">
+            <!-- WORKBENCH VIEW -->
+            <Grid Visibility="{Binding IsWorkbenchVisible, Converter={StaticResource BoolToVis}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Top Command Strip: Local ID + Remote Connect -->
+                <StackPanel Grid.Row="0" Margin="0,0,0,18">
+                    <!-- Host Active Session Security Banner -->
+                    <Border Visibility="{Binding IsHostSessionActive, Converter={StaticResource BoolToVis}}"
+                            Background="{DynamicResource AccentDangerBrush}"
+                            CornerRadius="8"
+                            Padding="14,10"
+                            Margin="0,0,0,12">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="Revoke Input"
+                                        Command="{Binding RevokeInputCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Terminate Session"
+                                        Command="{Binding DisconnectHostCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding ActiveHostBannerText}"
+                                       Foreground="#FFFFFF"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Local Identity Card -->
+                    <Border Grid.Column="0"
+                            Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="THIS WORKSTATION ID" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding DeviceId}"
+                                           FontFamily="Consolas, Cascadia Mono, Courier New"
+                                           FontSize="22"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,14,0" />
+                                <Button Content="{Binding CopyButtonLabel}"
+                                        Command="{Binding CopyIdCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </StackPanel>
+                            <TextBlock Text="Explicit host approval required for every incoming session"
+                                       FontSize="11.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Remote Connect Command Card -->
+                    <Border Grid.Column="2"
+                            Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="CONNECT TO REMOTE WORKSTATION" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" />
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding PartnerIdInput, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource InputBoxStyle}"
+                                         FontFamily="Consolas, Cascadia Mono, Courier New"
+                                         FontSize="16" />
+                                <Button Grid.Column="2"
+                                        Content="Connect"
+                                        Command="{Binding ConnectCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        MinWidth="110" />
+                            </Grid>
+                            <TextBlock Text="Enter a 9-digit partner ID (e.g. 482-910-334) or select a discovered LAN peer below."
+                                       FontSize="11.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                </StackPanel>
+
+                <!-- Split Workbench: Discovered LAN Peers + Recent Sessions -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Discovered LAN Peers -->
+                    <Border Grid.Column="0"
+                            Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="16">
+                        <DockPanel>
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <TextBlock Text="Discovered LAN Devices" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="No internet required" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <Grid>
+                                <Border Background="{DynamicResource BgElevatedBrush}"
+                                        CornerRadius="6"
+                                        Padding="14"
+                                        Visibility="{Binding HasNoDiscoveredPeers, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <TextBlock Text="Scanning Local Subnet" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,4" />
+                                        <TextBlock Text="Peers running MyRemote on your local Wi-Fi or Ethernet subnet will appear here automatically."
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   TextWrapping="Wrap"
+                                                   TextAlignment="Center"
+                                                   MaxWidth="320" />
+                                    </StackPanel>
+                                </Border>
+                                <ListBox ItemsSource="{Binding DiscoveredPeers}"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{DynamicResource TextPrimaryBrush}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource BgElevatedBrush}"
+                                                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="10,8"
+                                                    Margin="0,0,0,6">
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right"
+                                                            Content="Connect"
+                                                            Tag="{Binding}"
+                                                            Click="ConnectPeer_Click"
+                                                            Style="{StaticResource PrimaryButtonStyle}"
+                                                            Padding="12,6" />
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold" />
+                                                        <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}">
+                                                            <Run Text="{Binding DeviceId, Mode=OneWay}" />
+                                                            <Run Text=" | " />
+                                                            <Run Text="{Binding IpAddress, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Recent Sessions -->
+                    <Border Grid.Column="2"
+                            Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="16">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Recent Connections" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12" />
+                            <ListBox ItemsSource="{Binding RecentSessions}"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="{DynamicResource TextPrimaryBrush}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource BgElevatedBrush}"
+                                                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="10,8"
+                                                Margin="0,0,0,6">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Outcome}" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding RemoteDisplayName}" FontSize="13" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding RemoteDeviceId}" FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <!-- Bottom Status Bar -->
+                <Border Grid.Row="2"
+                        Margin="0,14,0,0"
+                        Background="{DynamicResource BgCardBrush}"
+                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="12,8">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="Zero unattended access" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
+                        <TextBlock Text="{Binding StatusMessage}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </DockPanel>
+                </Border>
+            </Grid>
+
+            <!-- SESSIONS HISTORY VIEW -->
+            <Border Visibility="{Binding IsSessionsVisible, Converter={StaticResource BoolToVis}}"
+                    Background="{DynamicResource BgCardBrush}"
+                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Session History" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,14" />
+                    <DataGrid ItemsSource="{Binding RecentSessions}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              HeadersVisibility="Column"
+                              RowHeaderWidth="0"
+                              Background="{DynamicResource BgCardBrush}"
+                              Foreground="{DynamicResource TextPrimaryBrush}"
+                              BorderBrush="{DynamicResource BorderSubtleBrush}"
+                              BorderThickness="1"
+                              GridLinesVisibility="None">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Device ID" Binding="{Binding RemoteDeviceId}" Width="140" />
+                            <DataGridTextColumn Header="Name" Binding="{Binding RemoteDisplayName}" Width="180" />
+                            <DataGridTextColumn Header="Role (Host)" Binding="{Binding WasHost}" Width="90" />
+                            <DataGridTextColumn Header="Transport" Binding="{Binding Transport}" Width="120" />
+                            <DataGridTextColumn Header="Started (UTC)" Binding="{Binding StartedAtUtc}" Width="190" />
+                            <DataGridTextColumn Header="Outcome" Binding="{Binding Outcome}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Border>
+
+            <!-- SETTINGS VIEW -->
+            <ScrollViewer Visibility="{Binding IsSettingsVisible, Converter={StaticResource BoolToVis}}" VerticalScrollBarVisibility="Auto">
+                <Border Background="{DynamicResource BgCardBrush}"
+                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="22">
+                    <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+                        <TextBlock Text="Application Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
+
+                        <TextBlock Text="Display Name" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding DisplayName}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,14" />
+
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="TCP Listen Port" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding ListenPort}" Style="{StaticResource InputBoxStyle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="LAN Discovery UDP Port" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding DiscoveryPort}" Style="{StaticResource InputBoxStyle}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Target FPS (5-60)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding TargetFps}" Style="{StaticResource InputBoxStyle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Frame Quality (20-95)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding JpegQuality}" Style="{StaticResource InputBoxStyle}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <CheckBox Content="Enable Local Network (LAN) Peer Discovery"
+                                  IsChecked="{Binding EnableLanDiscovery}"
+                                  Foreground="{DynamicResource TextPrimaryBrush}"
+                                  Margin="0,4,0,8" />
+                        <CheckBox Content="Pre-select Mouse &amp; Keyboard input in incoming approval dialog"
+                                  IsChecked="{Binding AllowInputByDefault}"
+                                  Foreground="{DynamicResource TextPrimaryBrush}"
+                                  Margin="0,0,0,8" />
+                        <CheckBox Content="Pre-select Clipboard Sharing in incoming approval dialog"
+                                  IsChecked="{Binding AllowClipboardByDefault}"
+                                  Foreground="{DynamicResource TextPrimaryBrush}"
+                                  Margin="0,0,0,8" />
+                        <CheckBox Content="Pre-select File Transfer in incoming approval dialog"
+                                  IsChecked="{Binding AllowFileTransferByDefault}"
+                                  Foreground="{DynamicResource TextPrimaryBrush}"
+                                  Margin="0,0,0,16" />
+
+                        <TextBlock Text="STUN Server (Optional Internet Diagnostics)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding StunServer}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="Custom Self-Hosted Signaling URL (Optional)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding CustomSignalingUrl}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="Custom Self-Hosted TURN Server (Optional)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding CustomTurnServer}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,18" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Button Content="Save Settings"
+                                    Command="{Binding SaveSettingsCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}" />
+                            <Button Content="Run Network Diagnostics"
+                                    Command="{Binding RunDiagnosticsCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="10,0,0,0" />
+                            <TextBlock Text="Saved to SQLite"
+                                       Foreground="{DynamicResource AccentSuccessBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="14,0,0,0"
+                                       Visibility="{Binding IsSettingsSavedNoticeVisible, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+                        <Border Background="{DynamicResource BgElevatedBrush}"
+                                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12">
+                            <TextBlock Text="{Binding DiagnosticsOutput}"
+                                       FontFamily="Consolas"
+                                       FontSize="11.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
+
+            <!-- ABOUT VIEW -->
+            <Border Visibility="{Binding IsAboutVisible, Converter={StaticResource BoolToVis}}"
+                    Background="{DynamicResource BgCardBrush}"
+                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="22">
+                <StackPanel MaxWidth="680" HorizontalAlignment="Left">
+                    <TextBlock Text="About MyRemote" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+                    <TextBlock FontSize="13" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,16">
+                        <Run Text="Version " />
+                        <Run Text="{Binding AppVersion, Mode=OneWay}" />
+                        <Run Text=" — Free, Open, Consent-First Windows Remote Desktop" />
+                    </TextBlock>
+
+                    <Border Background="{DynamicResource BgElevatedBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="16"
+                            Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="Non-Negotiable Security Guarantees" FontSize="13.5" FontWeight="SemiBold" Margin="0,0,0,8" />
+                            <TextBlock Text="- Every incoming session requires explicit approval by the local user." FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                            <TextBlock Text="- No unattended access, no hidden background service, no silent control." FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                            <TextBlock Text="- Immediate one-click disconnect and live permission revocation." FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                            <TextBlock Text="- Local LAN connections work completely offline without cloud servers." FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Local Diagnostics &amp; Logs Directory:" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" />
+                    <TextBlock Text="{Binding LogDirectory}" FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

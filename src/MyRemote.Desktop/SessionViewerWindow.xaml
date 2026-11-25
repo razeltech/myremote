@@ -1,0 +1,96 @@
+<Window x:Class="MyRemote.Desktop.SessionViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MyRemote — Active Remote Session"
+        Icon="pack://application:,,,/Assets/myremote.ico"
+        Width="1280"
+        Height="800"
+        MinWidth="860"
+        MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        Background="#0A0C10"
+        Foreground="{DynamicResource TextPrimaryBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        PreviewKeyUp="Window_PreviewKeyUp">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Top Session Control Bar -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource BgRailBrush}"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="8" Height="8" Fill="{DynamicResource AccentSuccessBrush}" Margin="0,0,8,0" />
+                    <TextBlock x:Name="RemoteTitleText" Text="Connected" FontWeight="SemiBold" FontSize="13" Margin="0,0,14,0" />
+                    <TextBlock x:Name="DurationText" Text="00:00:00" FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,14,0" />
+                    <TextBlock x:Name="TelemetryText" Text="0 FPS | 0 KB/s" FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <ComboBox x:Name="MonitorCombo"
+                              Width="150"
+                              Margin="0,0,8,0"
+                              SelectionChanged="MonitorCombo_SelectionChanged" />
+                    <ComboBox x:Name="QualityCombo"
+                              Width="135"
+                              Margin="0,0,8,0"
+                              SelectedIndex="1"
+                              SelectionChanged="QualityCombo_SelectionChanged">
+                        <ComboBoxItem Content="High (85% / 1.0x)" Tag="85,1.0" />
+                        <ComboBoxItem Content="Balanced (70% / 0.85x)" Tag="70,0.85" />
+                        <ComboBoxItem Content="Saver (50% / 0.65x)" Tag="50,0.65" />
+                    </ComboBox>
+                    <Button Content="Sync Clipboard" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="SyncClipboard_Click" />
+                    <Button Content="Send File" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="SendFile_Click" />
+                    <Button Content="Chat" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="ToggleChat_Click" />
+                    <Button x:Name="FullScreenBtn" Content="Full Screen" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="ToggleFullScreen_Click" />
+                    <Button Content="Disconnect" Style="{StaticResource DangerButtonStyle}" Padding="14,7" Click="Disconnect_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Main Viewer + Optional Chat Drawer -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="ChatColumn" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="#07080B" Focusable="True" x:Name="ScreenHost">
+                <Image x:Name="RemoteScreenImage"
+                       Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       MouseMove="RemoteScreen_MouseMove"
+                       MouseDown="RemoteScreen_MouseDown"
+                       MouseUp="RemoteScreen_MouseUp"
+                       MouseWheel="RemoteScreen_MouseWheel" />
+            </Border>
+
+            <!-- Session Chat Drawer -->
+            <Border Grid.Column="1"
+                    Background="{DynamicResource BgRailBrush}"
+                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                    BorderThickness="1,0,0,0"
+                    Padding="12">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Session Chat" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,10" />
+                    <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                        <Button DockPanel.Dock="Right" Content="Send" Style="{StaticResource PrimaryButtonStyle}" Padding="12,7" Margin="8,0,0,0" Click="SendChat_Click" />
+                        <TextBox x:Name="ChatInputBox" Style="{StaticResource InputBoxStyle}" />
+                    </DockPanel>
+                    <ListBox x:Name="ChatMessagesList"
+                             Background="{DynamicResource BgCardBrush}"
+                             BorderBrush="{DynamicResource BorderSubtleBrush}"
+                             Foreground="{DynamicResource TextPrimaryBrush}" />
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

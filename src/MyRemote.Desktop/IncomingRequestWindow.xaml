@@ -1,0 +1,67 @@
+<Window x:Class="MyRemote.Desktop.IncomingRequestWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Incoming Remote Session Request — MyRemote"
+        Icon="pack://application:,,,/Assets/myremote.ico"
+        Width="460"
+        Height="390"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        Background="{DynamicResource BgBaseBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI">
+    <Border Margin="18"
+            Background="{DynamicResource BgCardBrush}"
+            BorderBrush="{DynamicResource AccentWarningBrush}"
+            BorderThickness="1.5"
+            CornerRadius="8"
+            Padding="20">
+        <DockPanel LastChildFill="True">
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock Text="INCOMING CONNECTION REQUEST"
+                           FontSize="11"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource AccentWarningBrush}" />
+                <TextBlock x:Name="RequesterNameText"
+                           Text="Remote Workstation"
+                           FontSize="19"
+                           FontWeight="Bold"
+                           Margin="0,4,0,2" />
+                <TextBlock x:Name="RequesterMetaText"
+                           Text="ID: 000-000-000  |  IP: 127.0.0.1"
+                           FontFamily="Consolas"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           Margin="0,0,0,14" />
+
+                <TextBlock Text="Grant Permissions for This Session:"
+                           FontSize="12.5"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,8" />
+
+                <CheckBox x:Name="ViewScreenCheck" Content="View Desktop Screen" IsChecked="True" IsEnabled="False" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,6" />
+                <CheckBox x:Name="InputCheck" Content="Mouse &amp; Keyboard Control" IsChecked="True" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,6" />
+                <CheckBox x:Name="ClipboardCheck" Content="Clipboard Sharing" IsChecked="False" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,6" />
+                <CheckBox x:Name="FileTransferCheck" Content="File Transfer (User-Approved)" IsChecked="False" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,6" />
+                <CheckBox x:Name="ChatCheck" Content="Session Text Chat" IsChecked="True" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,12" />
+            </StackPanel>
+
+            <Grid DockPanel.Dock="Bottom" VerticalAlignment="Bottom">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button Grid.Column="0"
+                        Content="Reject"
+                        Style="{StaticResource DangerButtonStyle}"
+                        Click="Reject_Click" />
+                <Button Grid.Column="2"
+                        Content="Accept Session"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="Accept_Click" />
+            </Grid>
+        </DockPanel>
+    </Border>
+</Window>

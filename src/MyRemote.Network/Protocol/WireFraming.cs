@@ -20,7 +20,8 @@ public enum WireMessageType : byte
     FileComplete = 13,
     PermissionUpdate = 14,
     Disconnect = 15,
-    Heartbeat = 16
+    Heartbeat = 16,
+    VoiceAudio = 17
 }
 
 public sealed record WireFrame(WireMessageType Type, byte[] Payload);

@@ -28,7 +28,10 @@ public sealed class RemotePeerTransport(
     private CancellationTokenSource? _sessionCts;
     private X509Certificate2? _serverCert;
 
-    public Func<SessionRequest, Task<SessionApprovalResult>>? IncomingApprovalHandler { get; set; }
+    /// <summary>How long the host's consent dialog may stay open before the request is auto-rejected.</summary>
+    public static readonly TimeSpan ApprovalTimeout = TimeSpan.FromSeconds(60);
+
+    public Func<SessionRequest, CancellationToken, Task<SessionApprovalResult>>? IncomingApprovalHandler { get; set; }
 
     public event EventHandler<byte[]>? ScreenFrameReceived;
     public event EventHandler<byte[]>? InputCommandPayloadReceived;
@@ -38,13 +41,16 @@ public sealed class RemotePeerTransport(
     public event EventHandler<string>? ClipboardTextReceived;
     public event EventHandler<ChatPayload>? ChatReceived;
     public event EventHandler<byte[]>? FileOfferPayloadReceived;
-    public event EventHandler<string>? FileAcceptReceived;
+    public event EventHandler<FileDecisionPayload>? FileDecisionReceived;
     public event EventHandler<FileChunkPayload>? FileChunkReceived;
     public event EventHandler<string>? FileCompleteReceived;
+    public event EventHandler<byte[]>? VoiceAudioReceived;
     public event EventHandler<SessionPermissions>? PermissionsUpdated;
     public event EventHandler<string>? SessionDisconnected;
 
     public bool IsSessionActive => _activeStream is not null && sessionManager.State == ConnectionState.Connected;
+
+    public bool IsCongested => false;
 
     public void StartListening(DeviceIdentity localIdentity, int listenPort)
     {
@@ -75,7 +81,7 @@ public sealed class RemotePeerTransport(
         SessionPermissions requestedPermissions,
         CancellationToken cancellationToken = default)
     {
-        if (!sessionManager.TryTransitionTo(ConnectionState.Connecting))
+        if (!sessionManager.TryTransition(ConnectionState.Idle, ConnectionState.Connecting))
         {
             return new SessionApprovalResult(false, SessionPermissions.None, null, "Another session is already active.");
         }
@@ -101,10 +107,14 @@ public sealed class RemotePeerTransport(
                 localIdentity.DeviceId,
                 localDisplayName,
                 requestedPermissions,
-                Guid.NewGuid().ToString("N"));
+                Guid.NewGuid().ToString("N"),
+                ProtocolInfo.CurrentVersion);
             await WireFraming.WriteJsonAsync(ssl, WireMessageType.HelloRequest, hello, cancellationToken).ConfigureAwait(false);
 
-            var responseFrame = await WireFraming.ReadFrameAsync(ssl, cancellationToken).ConfigureAwait(false);
+            // The host user may take a while to click Accept; wait a little longer than the host-side timeout.
+            using var approvalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            approvalCts.CancelAfter(ApprovalTimeout + TimeSpan.FromSeconds(10));
+            var responseFrame = await WireFraming.ReadFrameAsync(ssl, approvalCts.Token).ConfigureAwait(false);
             if (responseFrame is null || responseFrame.Type != WireMessageType.ApprovalResponse)
             {
                 sessionManager.EndSession("Invalid approval response");
@@ -144,8 +154,17 @@ public sealed class RemotePeerTransport(
             logger.LogWarning(ex, "Outgoing connection to {Host}:{Port} failed", hostIp, port);
             ssl?.Dispose();
             client?.Dispose();
-            sessionManager.EndSession($"Connection failed: {ex.Message}");
-            return new SessionApprovalResult(false, SessionPermissions.None, null, ex.Message);
+            var reason = ex switch
+            {
+                OperationCanceledException => "The remote user did not answer the request in time.",
+                System.Net.Sockets.SocketException se when se.SocketErrorCode == System.Net.Sockets.SocketError.ConnectionRefused
+                    => $"{hostIp}:{port} refused the connection (MyRemote not running there, or a firewall blocks TCP {port}).",
+                System.Net.Sockets.SocketException se when se.SocketErrorCode == System.Net.Sockets.SocketError.TimedOut
+                    => $"{hostIp}:{port} did not respond (wrong address, or a firewall blocks TCP {port}).",
+                _ => ex.Message
+            };
+            sessionManager.EndSession($"Connection failed: {reason}");
+            return new SessionApprovalResult(false, SessionPermissions.None, null, reason);
         }
     }
 
@@ -173,6 +192,7 @@ public sealed class RemotePeerTransport(
     {
         var remoteIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown";
         SslStream? ssl = null;
+        bool claimedState = false;
 
         try
         {
@@ -183,53 +203,61 @@ public sealed class RemotePeerTransport(
                 return;
             }
 
-            if (sessionManager.State != ConnectionState.Idle)
+            // Claim the single session slot atomically so a second request cannot open a second consent dialog.
+            if (!sessionManager.TryTransition(ConnectionState.Idle, ConnectionState.AwaitingHostApproval))
             {
-                logger.LogInformation("Rejected incoming connection from {RemoteIp}: another session is active", remoteIp);
+                logger.LogInformation("Rejected incoming connection from {RemoteIp}: another session is active or pending", remoteIp);
                 client.Dispose();
                 return;
             }
+            claimedState = true;
 
             ssl = new SslStream(client.GetStream(), leaveInnerStreamOpen: false);
+            using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            handshakeCts.CancelAfter(TimeSpan.FromSeconds(15));
             await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
             {
                 ServerCertificate = _serverCert,
                 ClientCertificateRequired = false,
                 EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
-            }, ct).ConfigureAwait(false);
+            }, handshakeCts.Token).ConfigureAwait(false);
 
-            var helloFrame = await WireFraming.ReadFrameAsync(ssl, ct).ConfigureAwait(false);
+            var helloFrame = await WireFraming.ReadFrameAsync(ssl, handshakeCts.Token).ConfigureAwait(false);
             if (helloFrame is null || helloFrame.Type != WireMessageType.HelloRequest)
             {
-                ssl.Dispose();
-                client.Dispose();
-                return;
+                throw new InvalidDataException("Expected HelloRequest.");
             }
 
             var hello = JsonSerializer.Deserialize<HelloPayload>(helloFrame.Payload);
-            if (hello is null || !securityService.IsValidDeviceId(hello.DeviceId))
+            string? rejectReason = hello is null || !securityService.IsValidDeviceId(hello.DeviceId)
+                ? "Invalid device identity."
+                : hello.ProtocolVersion != ProtocolInfo.CurrentVersion
+                    ? $"Version mismatch (host protocol v{ProtocolInfo.CurrentVersion}, yours v{hello.ProtocolVersion}). Update MyRemote on both PCs."
+                    : null;
+            if (rejectReason is not null)
             {
+                logger.LogWarning("Rejecting {RemoteIp}: {Reason}", remoteIp, rejectReason);
                 await WireFraming.WriteJsonAsync(
                     ssl,
                     WireMessageType.ApprovalResponse,
-                    new ApprovalPayload(false, SessionPermissions.None, null, "Invalid device identity."),
+                    new ApprovalPayload(false, SessionPermissions.None, null, rejectReason),
                     ct).ConfigureAwait(false);
-                ssl.Dispose();
-                client.Dispose();
                 return;
             }
 
             var request = new SessionRequest(
                 RequestId: Guid.NewGuid().ToString("N"),
-                RequesterDeviceId: hello.DeviceId,
+                RequesterDeviceId: hello!.DeviceId,
                 RequesterDisplayName: string.IsNullOrWhiteSpace(hello.DisplayName) ? hello.DeviceId : hello.DisplayName,
                 RequesterIpAddress: remoteIp,
                 RequestedPermissions: hello.RequestedPermissions,
                 RequestedAtUtc: DateTimeOffset.UtcNow,
                 Nonce: hello.Nonce);
 
+            using var approvalCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            approvalCts.CancelAfter(ApprovalTimeout);
             SessionApprovalResult approval = IncomingApprovalHandler is not null
-                ? await IncomingApprovalHandler(request).ConfigureAwait(false)
+                ? await IncomingApprovalHandler(request, approvalCts.Token).ConfigureAwait(false)
                 : new SessionApprovalResult(false, SessionPermissions.None, null, "No host approval handler registered.");
 
             if (!approval.Approved || string.IsNullOrWhiteSpace(approval.SessionToken))
@@ -239,8 +267,6 @@ public sealed class RemotePeerTransport(
                     WireMessageType.ApprovalResponse,
                     new ApprovalPayload(false, SessionPermissions.None, null, approval.Reason ?? "Rejected by host."),
                     ct).ConfigureAwait(false);
-                ssl.Dispose();
-                client.Dispose();
                 return;
             }
 
@@ -253,6 +279,7 @@ public sealed class RemotePeerTransport(
             _activeClient = client;
             _activeStream = ssl;
             _sessionCts = new CancellationTokenSource();
+            claimedState = false; // ownership passes to the session; ReadLoopAsync cleans up
 
             var session = new RemoteSession(
                 SessionId: request.RequestId,
@@ -272,8 +299,16 @@ public sealed class RemotePeerTransport(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Incoming session handling failed for {RemoteIp}", remoteIp);
-            ssl?.Dispose();
-            client.Dispose();
+        }
+        finally
+        {
+            if (claimedState)
+            {
+                // Request never became a session: release the slot and the socket.
+                ssl?.Dispose();
+                client.Dispose();
+                sessionManager.EndSession("Incoming request not completed");
+            }
         }
     }
 
@@ -368,21 +403,20 @@ public sealed class RemotePeerTransport(
                 FileOfferPayloadReceived?.Invoke(this, frame.Payload);
                 break;
 
-            case WireMessageType.FileAccept:
-                var accEnv = JsonSerializer.Deserialize<TokenEnvelope<string>>(frame.Payload);
+            case WireMessageType.FileAccept when !isHost:
+                var accEnv = JsonSerializer.Deserialize<TokenEnvelope<FileDecisionPayload>>(frame.Payload);
                 if (accEnv is not null && securityService.ValidateSessionToken(session.SessionToken, accEnv.SessionToken))
                 {
-                    FileAcceptReceived?.Invoke(this, accEnv.Data);
+                    FileDecisionReceived?.Invoke(this, accEnv.Data);
                 }
                 break;
 
             case WireMessageType.FileChunk:
-                var chunkEnv = JsonSerializer.Deserialize<TokenEnvelope<FileChunkPayload>>(frame.Payload);
-                if (chunkEnv is not null &&
-                    securityService.ValidateSessionToken(session.SessionToken, chunkEnv.SessionToken) &&
+                if (BinaryEnvelope.TryUnpack(frame.Payload, out var chunkToken, out var chunkId, out var chunkData) &&
+                    securityService.ValidateSessionToken(session.SessionToken, chunkToken) &&
                     sessionManager.HasPermission(SessionPermissions.FileTransfer))
                 {
-                    FileChunkReceived?.Invoke(this, chunkEnv.Data);
+                    FileChunkReceived?.Invoke(this, new FileChunkPayload(chunkId, chunkData.ToArray()));
                 }
                 break;
 
@@ -400,6 +434,15 @@ public sealed class RemotePeerTransport(
                 var perm = JsonSerializer.Deserialize<SessionPermissions>(frame.Payload);
                 sessionManager.UpdatePermissions(perm);
                 PermissionsUpdated?.Invoke(this, perm);
+                break;
+
+            case WireMessageType.VoiceAudio:
+                if (BinaryEnvelope.TryUnpack(frame.Payload, out var voiceToken, out _, out var pcm) &&
+                    securityService.ValidateSessionToken(session.SessionToken, voiceToken) &&
+                    sessionManager.HasPermission(SessionPermissions.VoiceChat))
+                {
+                    VoiceAudioReceived?.Invoke(this, pcm.ToArray());
+                }
                 break;
 
             case WireMessageType.Disconnect:

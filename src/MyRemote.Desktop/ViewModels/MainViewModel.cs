@@ -60,6 +60,11 @@ public sealed class MainViewModel : ObservableObject
     private string _stunServer = "stun.l.google.com:19302";
     private string _customSignalingUrl = string.Empty;
     private string _customTurnServer = string.Empty;
+    private string _turnUsername = string.Empty;
+    private string _turnPassword = string.Empty;
+    private string _hostChatInput = string.Empty;
+    private string _internetStatusText = "Internet: connecting…";
+    private readonly System.Windows.Threading.DispatcherTimer _statusTimer;
 
     public MainViewModel(
         IDeviceIdentityProvider identityProvider,
@@ -119,6 +124,29 @@ public sealed class MainViewModel : ObservableObject
             });
         };
 
+        _coordinator.HostSessionStarted += (_, session) =>
+        {
+            Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                HostChatMessages.Clear();
+                ActiveSection = NavSection.Workbench;
+                App.RestoreMainWindow();
+            });
+        };
+
+        _coordinator.HostChatReceived += (_, chat) =>
+        {
+            Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                HostChatMessages.Add($"[{chat.SentAtUtc.ToLocalTime():HH:mm}] {chat.SenderName}: {chat.Message}");
+                App.RestoreMainWindow();
+            });
+        };
+
+        _statusTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _statusTimer.Tick += (_, _) => RefreshInternetStatus();
+        _statusTimer.Start();
+
         _coordinator.PeersUpdated += (_, peers) =>
         {
             Application.Current?.Dispatcher.Invoke(() =>
@@ -139,14 +167,17 @@ public sealed class MainViewModel : ObservableObject
         CopyLogsCommand = new RelayCommand(CopyLogs);
         OpenLogFolderCommand = new RelayCommand(OpenLogFolder);
         ClearLogsCommand = new RelayCommand(() => LogEntries.Clear());
+        SendHostChatCommand = new AsyncRelayCommand(SendHostChatAsync, () => !string.IsNullOrWhiteSpace(HostChatInput));
     }
 
     public string LogDirectory { get; }
-    public string AppVersion => "1.0.3";
+    public string AppVersion { get; } =
+        typeof(MainViewModel).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "dev";
 
     public ObservableCollection<DiscoveredPeer> DiscoveredPeers { get; } = [];
     public ObservableCollection<SessionHistoryEntry> RecentSessions { get; } = [];
     public ObservableCollection<string> LogEntries { get; } = [];
+    public ObservableCollection<string> HostChatMessages { get; } = [];
     public bool HasNoDiscoveredPeers => DiscoveredPeers.Count == 0;
 
     public NavSection ActiveSection
@@ -209,6 +240,10 @@ public sealed class MainViewModel : ObservableObject
     public string StunServer { get => _stunServer; set => SetProperty(ref _stunServer, value); }
     public string CustomSignalingUrl { get => _customSignalingUrl; set => SetProperty(ref _customSignalingUrl, value); }
     public string CustomTurnServer { get => _customTurnServer; set => SetProperty(ref _customTurnServer, value); }
+    public string TurnUsername { get => _turnUsername; set => SetProperty(ref _turnUsername, value); }
+    public string TurnPassword { get => _turnPassword; set => SetProperty(ref _turnPassword, value); }
+    public string HostChatInput { get => _hostChatInput; set => SetProperty(ref _hostChatInput, value); }
+    public string InternetStatusText { get => _internetStatusText; private set => SetProperty(ref _internetStatusText, value); }
 
     public ICommand CopyIdCommand { get; }
     public ICommand ToggleThemeCommand { get; }
@@ -220,6 +255,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand CopyLogsCommand { get; }
     public ICommand OpenLogFolderCommand { get; }
     public ICommand ClearLogsCommand { get; }
+    public ICommand SendHostChatCommand { get; }
 
     public async Task InitializeAsync()
     {
@@ -263,6 +299,27 @@ public sealed class MainViewModel : ObservableObject
         StunServer = s.StunServer;
         CustomSignalingUrl = s.CustomSignalingUrl;
         CustomTurnServer = s.CustomTurnServer;
+        TurnUsername = s.TurnUsername;
+        TurnPassword = s.TurnPassword;
+    }
+
+    private void RefreshInternetStatus()
+    {
+        var relay = _coordinator.HasTurnRelay ? "TURN relay configured" : "no TURN relay (strict NATs will fail)";
+        InternetStatusText = _coordinator.IsInternetSignalingReady
+            ? $"Internet: online as {DeviceId} — {relay}"
+            : _coordinator.InternetSignalingError is { } err
+                ? $"Internet: {err}"
+                : "Internet: connecting to signaling server…";
+    }
+
+    private async Task SendHostChatAsync()
+    {
+        var text = HostChatInput.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        HostChatInput = string.Empty;
+        HostChatMessages.Add($"[{DateTime.Now:HH:mm}] You: {text}");
+        await _coordinator.SendHostChatAsync(text);
     }
 
     private async Task CopyIdAsync()
@@ -302,7 +359,9 @@ public sealed class MainViewModel : ObservableObject
             AllowFileTransferByDefaultInPrompt = AllowFileTransferByDefault,
             StunServer = StunServer.Trim(),
             CustomSignalingUrl = CustomSignalingUrl.Trim(),
-            CustomTurnServer = CustomTurnServer.Trim()
+            CustomTurnServer = CustomTurnServer.Trim(),
+            TurnUsername = TurnUsername.Trim(),
+            TurnPassword = TurnPassword
         };
 
         await _settingsRepository.SaveAsync(settings);

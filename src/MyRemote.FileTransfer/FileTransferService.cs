@@ -65,13 +65,28 @@ public sealed class FileTransferService(ISessionManager sessionManager)
         return true;
     }
 
-    public async Task<FileTransferProgress?> AppendChunkAsync(string transferId, ReadOnlyMemory<byte> chunk, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Appends a chunk synchronously so chunks are written strictly in arrival order
+    /// (async fire-and-forget writes could interleave and corrupt the file).
+    /// </summary>
+    public FileTransferProgress? AppendChunk(string transferId, ReadOnlySpan<byte> chunk)
     {
         if (!sessionManager.HasPermission(SessionPermissions.FileTransfer)) return null;
         if (!_incoming.TryGetValue(transferId, out var state)) return null;
 
-        await state.Stream.WriteAsync(chunk, cancellationToken).ConfigureAwait(false);
-        state.BytesWritten += chunk.Length;
+        lock (state)
+        {
+            if (state.BytesWritten + chunk.Length > state.Offer.TotalBytes)
+            {
+                // Sender is sending more than it announced: abort rather than fill the disk.
+                CancelReceive(transferId);
+                return new FileTransferProgress(transferId, state.Offer.FileName, state.BytesWritten, state.Offer.TotalBytes,
+                    IsCompleted: false, IsCancelled: true, ErrorMessage: "Received more data than announced; transfer cancelled.");
+            }
+
+            state.Stream.Write(chunk);
+            state.BytesWritten += chunk.Length;
+        }
 
         return new FileTransferProgress(
             transferId,

@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using MyRemote.Core.Interfaces;
 using MyRemote.Core.Models;
+using MyRemote.Desktop.Services;
 using MyRemote.FileTransfer;
 using MyRemote.Input;
 using MyRemote.Network;
@@ -22,6 +23,7 @@ public partial class SessionViewerWindow : Window
     private readonly FileTransferService _fileTransferService;
     private readonly DispatcherTimer _statsTimer;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+    private readonly VoiceAudioService _voiceAudio = new();
 
     private IReadOnlyList<MonitorDescriptor> _monitors = [];
     private int _selectedMonitorIndex;
@@ -30,6 +32,9 @@ public partial class SessionViewerWindow : Window
     private bool _isFullScreen;
     private bool _isChatOpen;
     private DateTime _lastMouseMoveSent = DateTime.MinValue;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<FileDecisionPayload>> _pendingFileDecisions = new();
+    private string _fileStatus = string.Empty;
+    private bool _isSendingFile;
 
     public SessionViewerWindow(
         IPeerTransport transport,
@@ -46,7 +51,17 @@ public partial class SessionViewerWindow : Window
         _transport.ScreenFrameReceived += OnScreenFrameReceived;
         _transport.MonitorListPayloadReceived += OnMonitorListReceived;
         _transport.ChatReceived += OnChatReceived;
+        _transport.VoiceAudioReceived += OnVoiceAudioReceived;
+        _transport.FileDecisionReceived += OnFileDecisionReceived;
         _transport.SessionDisconnected += OnSessionDisconnected;
+
+        _voiceAudio.AudioCaptured += pcm =>
+        {
+            if (_transport.IsSessionActive && _sessionManager.HasPermission(SessionPermissions.VoiceChat))
+            {
+                _ = _transport.SendTokenBinaryAsync(_sessionManager, WireMessageType.VoiceAudio, string.Empty, pcm);
+            }
+        };
 
         _statsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _statsTimer.Tick += (_, _) =>
@@ -55,7 +70,9 @@ public partial class SessionViewerWindow : Window
             DurationText.Text = elapsed.ToString(@"hh\:mm\:ss");
             int fps = Interlocked.Exchange(ref _frameCount, 0);
             long kb = Interlocked.Exchange(ref _bytesReceived, 0) / 1024;
-            TelemetryText.Text = $"{fps} FPS | {kb} KB/s";
+            TelemetryText.Text = string.IsNullOrEmpty(_fileStatus)
+                ? $"{fps} FPS | {kb} KB/s"
+                : $"{fps} FPS | {kb} KB/s | {_fileStatus}";
         };
         _statsTimer.Start();
     }
@@ -109,6 +126,42 @@ public partial class SessionViewerWindow : Window
         });
     }
 
+    private void OnFileDecisionReceived(object? sender, FileDecisionPayload decision)
+    {
+        if (_pendingFileDecisions.TryRemove(decision.TransferId, out var tcs))
+        {
+            tcs.TrySetResult(decision);
+        }
+    }
+
+    private void OnVoiceAudioReceived(object? sender, byte[] pcm)
+    {
+        _voiceAudio.StartPlayback();
+        _voiceAudio.PlayAudio(pcm);
+    }
+
+    private void ToggleVoice_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_sessionManager.HasPermission(SessionPermissions.VoiceChat))
+        {
+            MessageBox.Show("Voice chat was not granted by the host.", "Permission Denied", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (_voiceAudio.IsMuted)
+        {
+            _voiceAudio.StartPlayback();
+            _voiceAudio.StartCapture();
+            _voiceAudio.IsMuted = false;
+            VoiceBtn.Content = "Voice: On";
+        }
+        else
+        {
+            _voiceAudio.IsMuted = true;
+            VoiceBtn.Content = "Voice: Off";
+        }
+    }
+
     private void OnSessionDisconnected(object? sender, string reason)
     {
         Dispatcher.BeginInvoke(() =>
@@ -118,7 +171,7 @@ public partial class SessionViewerWindow : Window
         });
     }
 
-    private (double nx, double ny) GetNormalizedCoords(MouseEventArgs e)
+    private (double nx, double ny) GetNormalizedCoords(System.Windows.Input.MouseEventArgs e)
     {
         var pos = e.GetPosition(RemoteScreenImage);
         double w = Math.Max(1.0, RemoteScreenImage.ActualWidth);
@@ -139,7 +192,7 @@ public partial class SessionViewerWindow : Window
         _ = _transport.SendTokenJsonAsync(WireMessageType.InputCommand, enriched);
     }
 
-    private void RemoteScreen_MouseMove(object sender, MouseEventArgs e)
+    private void RemoteScreen_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if ((DateTime.UtcNow - _lastMouseMoveSent).TotalMilliseconds < 16) return;
         _lastMouseMoveSent = DateTime.UtcNow;
@@ -186,7 +239,7 @@ public partial class SessionViewerWindow : Window
         SendInput(new RemoteInputEvent(InputEventType.MouseWheel, nx, ny, WheelDelta: e.Delta));
     }
 
-    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == Key.F11)
         {
@@ -202,7 +255,7 @@ public partial class SessionViewerWindow : Window
         }
     }
 
-    private void Window_PreviewKeyUp(object sender, KeyEventArgs e)
+    private void Window_PreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (ChatInputBox.IsKeyboardFocused) return;
         int vk = KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key);
@@ -249,28 +302,68 @@ public partial class SessionViewerWindow : Window
             MessageBox.Show("File transfer was not granted by the host.", "Permission Denied", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        if (_isSendingFile)
+        {
+            MessageBox.Show("A file is already being sent. Please wait for it to finish.", "File Transfer", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
 
         var dlg = new OpenFileDialog();
         if (dlg.ShowDialog(this) != true) return;
 
+        _isSendingFile = true;
         try
         {
+            _fileStatus = "Preparing file…";
             var offer = await _fileTransferService.PrepareOfferAsync(dlg.FileName);
+
+            // 1. Offer, then wait for the remote user to accept before sending any data.
+            var decisionTcs = new TaskCompletionSource<FileDecisionPayload>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingFileDecisions[offer.TransferId] = decisionTcs;
+            _fileStatus = $"Waiting for remote user to accept {offer.FileName}…";
             await _transport.SendTokenJsonAsync(WireMessageType.FileOffer, offer);
 
-            byte[] buffer = new byte[FileTransferService.ChunkSizeBytes];
-            await using var fs = File.OpenRead(dlg.FileName);
-            int read;
-            while ((read = await fs.ReadAsync(buffer)) > 0)
+            var finished = await Task.WhenAny(decisionTcs.Task, Task.Delay(TimeSpan.FromMinutes(2)));
+            _pendingFileDecisions.TryRemove(offer.TransferId, out _);
+            if (finished != decisionTcs.Task)
             {
-                await _transport.SendTokenJsonAsync(WireMessageType.FileChunk, new FileChunkPayload(offer.TransferId, buffer[..read]));
+                MessageBox.Show("The remote user did not answer the file offer.", "File Transfer", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
             }
+
+            var decision = await decisionTcs.Task;
+            if (!decision.Accepted)
+            {
+                MessageBox.Show($"File not sent: {decision.Reason ?? "declined by the remote user."}", "File Transfer", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // 2. Stream binary chunks (transport applies backpressure), showing progress.
+            byte[] buffer = new byte[FileTransferService.ChunkSizeBytes];
+            long sent = 0;
+            await using (var fs = File.OpenRead(dlg.FileName))
+            {
+                int read;
+                while ((read = await fs.ReadAsync(buffer)) > 0)
+                {
+                    if (!_transport.IsSessionActive) throw new IOException("Session ended during transfer.");
+                    await _transport.SendTokenBinaryAsync(_sessionManager, WireMessageType.FileChunk, offer.TransferId, buffer.AsMemory(0, read));
+                    sent += read;
+                    _fileStatus = $"Sending {offer.FileName}: {(offer.TotalBytes == 0 ? 100 : sent * 100 / offer.TotalBytes)}%";
+                }
+            }
+
             await _transport.SendTokenJsonAsync(WireMessageType.FileComplete, offer.TransferId);
-            MessageBox.Show($"Sent {offer.FileName} ({offer.TotalBytes} bytes).", "File Transfer", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show($"Sent {offer.FileName} ({offer.TotalBytes:N0} bytes). The remote PC verifies it with SHA-256.", "File Transfer", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
             MessageBox.Show($"File transfer failed: {ex.Message}", "File Transfer", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isSendingFile = false;
+            _fileStatus = string.Empty;
         }
     }
 
@@ -306,9 +399,12 @@ public partial class SessionViewerWindow : Window
     protected override async void OnClosed(EventArgs e)
     {
         _statsTimer.Stop();
+        _voiceAudio.Dispose();
         _transport.ScreenFrameReceived -= OnScreenFrameReceived;
         _transport.MonitorListPayloadReceived -= OnMonitorListReceived;
         _transport.ChatReceived -= OnChatReceived;
+        _transport.VoiceAudioReceived -= OnVoiceAudioReceived;
+        _transport.FileDecisionReceived -= OnFileDecisionReceived;
         _transport.SessionDisconnected -= OnSessionDisconnected;
         if (_transport.IsSessionActive)
         {

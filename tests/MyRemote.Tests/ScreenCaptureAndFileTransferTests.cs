@@ -71,7 +71,7 @@ public class ScreenCaptureAndFileTransferTests : IDisposable
         var recvDir = Path.Combine(_tempDir, "received");
         Assert.True(ft.BeginReceive(offer, recvDir));
         var bytes = await File.ReadAllBytesAsync(srcFile);
-        await ft.AppendChunkAsync(offer.TransferId, bytes);
+        ft.AppendChunk(offer.TransferId, bytes);
         var done = await ft.CompleteReceiveAsync(offer.TransferId);
         Assert.True(done.IsCompleted);
         Assert.False(done.IsCancelled);
@@ -80,7 +80,7 @@ public class ScreenCaptureAndFileTransferTests : IDisposable
         // Corrupted transfer fails SHA-256
         var badOffer = offer with { TransferId = "bad1", Sha256Hex = new string('0', 64) };
         Assert.True(ft.BeginReceive(badOffer, recvDir));
-        await ft.AppendChunkAsync("bad1", bytes);
+        ft.AppendChunk("bad1", bytes);
         var badDone = await ft.CompleteReceiveAsync("bad1");
         Assert.False(badDone.IsCompleted);
         Assert.True(badDone.IsCancelled);

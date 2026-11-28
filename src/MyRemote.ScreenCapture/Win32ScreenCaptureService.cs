@@ -13,6 +13,10 @@ public sealed class Win32ScreenCaptureService : IScreenCaptureService
     private const int Srccopy = 0x00CC0020;
     private const int Captureblt = 0x40000000;
     private const uint MonitorinfoFPrimary = 0x00000001;
+    private static readonly TimeSpan MonitorCacheLifetime = TimeSpan.FromSeconds(2);
+
+    private IReadOnlyList<MonitorDescriptor> _cachedMonitors = [];
+    private DateTime _monitorsCachedAtUtc = DateTime.MinValue;
 
     public IReadOnlyList<MonitorDescriptor> GetMonitors()
     {
@@ -42,7 +46,13 @@ public sealed class Win32ScreenCaptureService : IScreenCaptureService
 
     public CapturedFrame? CaptureMonitor(int monitorIndex, int jpegQuality = 75, double scale = 1.0)
     {
-        var monitors = GetMonitors();
+        // Enumerating monitors every frame is wasteful; refresh every couple of seconds to catch layout changes.
+        if (DateTime.UtcNow - _monitorsCachedAtUtc > MonitorCacheLifetime || _cachedMonitors.Count == 0)
+        {
+            _cachedMonitors = GetMonitors();
+            _monitorsCachedAtUtc = DateTime.UtcNow;
+        }
+        var monitors = _cachedMonitors;
         if (monitors.Count == 0) return null;
 
         var target = monitorIndex >= 0 && monitorIndex < monitors.Count

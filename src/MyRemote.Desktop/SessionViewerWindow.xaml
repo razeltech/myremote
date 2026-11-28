@@ -49,6 +49,7 @@
                     </ComboBox>
                     <Button Content="Sync Clipboard" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="SyncClipboard_Click" />
                     <Button Content="Send File" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="SendFile_Click" />
+                    <Button x:Name="VoiceBtn" Content="Voice: Off" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="ToggleVoice_Click" />
                     <Button Content="Chat" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="ToggleChat_Click" />
                     <Button x:Name="FullScreenBtn" Content="Full Screen" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" Click="ToggleFullScreen_Click" />
                     <Button Content="Disconnect" Style="{StaticResource DangerButtonStyle}" Padding="14,7" Click="Disconnect_Click" />

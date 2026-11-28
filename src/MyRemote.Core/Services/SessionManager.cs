@@ -45,6 +45,19 @@ public sealed class SessionManager(ILogger<SessionManager> logger) : ISessionMan
         return true;
     }
 
+    public bool TryTransition(ConnectionState expected, ConnectionState next)
+    {
+        lock (_sync)
+        {
+            if (_state != expected) return false;
+            _state = next;
+            logger.LogInformation("Connection state changed to {State}", next);
+        }
+
+        StateChanged?.Invoke(this, next);
+        return true;
+    }
+
     public void StartSession(RemoteSession session)
     {
         ArgumentNullException.ThrowIfNull(session);

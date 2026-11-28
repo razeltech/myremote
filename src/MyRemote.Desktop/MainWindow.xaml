@@ -122,7 +122,36 @@
                             <TextBlock Text="{Binding ActiveHostBannerText}"
                                        Foreground="#FFFFFF"
                                        FontWeight="SemiBold"
+                                       TextWrapping="Wrap"
                                        VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Host-side chat with the person controlling this PC -->
+                    <Border Visibility="{Binding IsHostSessionActive, Converter={StaticResource BoolToVis}}"
+                            Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="12,10"
+                            Margin="0,0,0,12">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Session chat" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <DockPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                                <Button DockPanel.Dock="Right"
+                                        Content="Send"
+                                        IsDefault="True"
+                                        Command="{Binding SendHostChatCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Margin="8,0,0,0" />
+                                <TextBox Text="{Binding HostChatInput, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource InputBoxStyle}" />
+                            </DockPanel>
+                            <ListBox ItemsSource="{Binding HostChatMessages}"
+                                     Height="90"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="{DynamicResource TextPrimaryBrush}" />
                         </DockPanel>
                     </Border>
 
@@ -313,7 +342,10 @@
                         Padding="12,8">
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Text="Zero unattended access" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
-                        <TextBlock Text="{Binding StatusMessage}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding StatusMessage}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding InternetStatusText}" FontSize="11.5" TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" Margin="0,2,0,0" />
+                        </StackPanel>
                     </DockPanel>
                 </Border>
             </Grid>
@@ -449,8 +481,14 @@
                         <TextBlock Text="Custom Self-Hosted Signaling URL (Optional)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
                         <TextBox Text="{Binding CustomSignalingUrl}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,12" />
 
-                        <TextBlock Text="Custom Self-Hosted TURN Server (Optional)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
-                        <TextBox Text="{Binding CustomTurnServer}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,18" />
+                        <TextBlock Text="TURN Relay Server(s) — needed when a PC is behind strict NAT / mobile data (e.g. turn:relay.example.com:3478, comma separated)" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding CustomTurnServer}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="TURN Username" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding TurnUsername}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="TURN Password (stored locally; use the same relay settings on both PCs)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding TurnPassword}" Style="{StaticResource InputBoxStyle}" Margin="0,0,0,18" />
 
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
                             <Button Content="Save Settings"

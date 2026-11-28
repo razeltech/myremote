@@ -35,7 +35,8 @@ public enum SessionPermissions
     ClipboardShare = 1 << 3,
     FileTransfer = 1 << 4,
     SessionChat = 1 << 5,
-    AllControl = ViewScreen | MouseInput | KeyboardInput | ClipboardShare | FileTransfer | SessionChat
+    VoiceChat = 1 << 6,
+    AllControl = ViewScreen | MouseInput | KeyboardInput | ClipboardShare | FileTransfer | SessionChat | VoiceChat
 }
 
 public sealed record SessionRequest(
@@ -97,5 +98,8 @@ public sealed class AppSettings
     public bool AllowFileTransferByDefaultInPrompt { get; set; } = false;
     public string StunServer { get; set; } = "stun.l.google.com:19302";
     public string CustomSignalingUrl { get; set; } = string.Empty;
+    /// <summary>One or more TURN URLs, comma separated, e.g. "turn:relay.example.com:3478,turns:relay.example.com:5349".</summary>
     public string CustomTurnServer { get; set; } = string.Empty;
+    public string TurnUsername { get; set; } = string.Empty;
+    public string TurnPassword { get; set; } = string.Empty;
 }

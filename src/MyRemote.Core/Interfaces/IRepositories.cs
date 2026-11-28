@@ -38,6 +38,9 @@ public interface ISessionManager
     event EventHandler<RemoteSession?>? SessionChanged;
 
     bool TryTransitionTo(ConnectionState nextState);
+
+    /// <summary>Atomically moves from <paramref name="expected"/> to <paramref name="next"/>; false if the current state differs.</summary>
+    bool TryTransition(ConnectionState expected, ConnectionState next);
     void StartSession(RemoteSession session);
     void UpdatePermissions(SessionPermissions updatedPermissions);
     bool HasPermission(SessionPermissions permission);

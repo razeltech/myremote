@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.ComponentModel;
+using System.Windows;
 using MyRemote.Desktop.ViewModels;
 
 namespace MyRemote.Desktop;
@@ -8,6 +9,18 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!App.IsExplicitExit)
+        {
+            e.Cancel = true;
+            Hide();
+            (Application.Current as App)?.NotifyMinimizedToTray();
+            return;
+        }
+        base.OnClosing(e);
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;

@@ -9,7 +9,18 @@ namespace MyRemote.Network;
 public interface IPeerTransport
 {
     bool IsSessionActive { get; }
-    Func<SessionRequest, Task<SessionApprovalResult>>? IncomingApprovalHandler { get; set; }
+
+    /// <summary>
+    /// True when the outgoing buffer is backed up and the host should skip screen frames ("latest frame wins").
+    /// Always false for TCP, where awaiting the write already applies backpressure.
+    /// </summary>
+    bool IsCongested { get; }
+
+    /// <summary>
+    /// Asks the local user to approve an incoming request. The token is cancelled if the requester goes away
+    /// (or the request times out) so the consent dialog can close itself.
+    /// </summary>
+    Func<SessionRequest, CancellationToken, Task<SessionApprovalResult>>? IncomingApprovalHandler { get; set; }
 
     event EventHandler<byte[]>? ScreenFrameReceived;
     event EventHandler<byte[]>? InputCommandPayloadReceived;
@@ -19,8 +30,10 @@ public interface IPeerTransport
     event EventHandler<string>? ClipboardTextReceived;
     event EventHandler<ChatPayload>? ChatReceived;
     event EventHandler<byte[]>? FileOfferPayloadReceived;
+    event EventHandler<FileDecisionPayload>? FileDecisionReceived;
     event EventHandler<FileChunkPayload>? FileChunkReceived;
     event EventHandler<string>? FileCompleteReceived;
+    event EventHandler<byte[]>? VoiceAudioReceived;
     event EventHandler<SessionPermissions>? PermissionsUpdated;
     event EventHandler<string>? SessionDisconnected;
 

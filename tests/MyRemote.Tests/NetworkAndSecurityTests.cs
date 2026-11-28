@@ -29,7 +29,7 @@ public class NetworkAndSecurityTests
         var hostMgr = new SessionManager(NullLogger<SessionManager>.Instance);
         using var host = new RemotePeerTransport(hostMgr, hostSec, NullLogger<RemotePeerTransport>.Instance);
 
-        host.IncomingApprovalHandler = _ => Task.FromResult(
+        host.IncomingApprovalHandler = (_, _) => Task.FromResult(
             new SessionApprovalResult(false, SessionPermissions.None, null, "User declined"));
 
         var hostId = new DeviceIdentity("111-111-111", "HostPC", "HostPC", "Windows", "FP1", DateTimeOffset.UtcNow);
@@ -56,7 +56,7 @@ public class NetworkAndSecurityTests
         var hostMgr = new SessionManager(NullLogger<SessionManager>.Instance);
         using var host = new RemotePeerTransport(hostMgr, hostSec, NullLogger<RemotePeerTransport>.Instance);
 
-        host.IncomingApprovalHandler = _ => Task.FromResult(
+        host.IncomingApprovalHandler = (_, _) => Task.FromResult(
             new SessionApprovalResult(true, SessionPermissions.ViewScreen | SessionPermissions.MouseInput, hostSec.GenerateSessionToken(), null));
 
         var hostId = new DeviceIdentity("111-111-111", "HostPC", "HostPC", "Windows", "FP1", DateTimeOffset.UtcNow);
